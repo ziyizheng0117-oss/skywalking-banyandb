@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>BanyanDB BYDBQL AI 自动生成方案调研</title>
+  <style>
+    :root { color-scheme: light dark; --fg:#172033; --muted:#667085; --bg:#f6f8fb; --card:#fff; --accent:#2864e6; --code:#eef3ff; --border:#d8e0ee; }
+    @media (prefers-color-scheme: dark){ :root{ --fg:#e8edf7; --muted:#aab4c5; --bg:#0d1117; --card:#151b23; --accent:#7aa2ff; --code:#1d2636; --border:#303948; } }
+    body{margin:0;font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans SC","PingFang SC",Arial,sans-serif;color:var(--fg);background:var(--bg)}
+    header{padding:56px 22px 34px;background:linear-gradient(135deg,#1f5eff,#7b61ff);color:white}
+    .wrap{max-width:1060px;margin:0 auto}.eyebrow{letter-spacing:.08em;text-transform:uppercase;opacity:.8;font-size:13px}h1{font-size:42px;line-height:1.15;margin:10px 0 16px}h2{font-size:28px;margin:38px 0 14px}h3{font-size:20px;margin:24px 0 10px}p{margin:10px 0}.subtitle{font-size:19px;max-width:850px;opacity:.92}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin:24px 0}.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px;box-shadow:0 8px 28px rgba(0,0,0,.06)}
+    main{padding:28px 22px 70px}.toc a{display:block;color:var(--accent);text-decoration:none;margin:6px 0}.badge{display:inline-block;background:var(--code);border:1px solid var(--border);padding:2px 8px;border-radius:999px;font-size:13px;margin:2px 4px 2px 0}code{background:var(--code);border-radius:6px;padding:2px 5px}pre{background:var(--code);border:1px solid var(--border);border-radius:14px;padding:16px;overflow:auto}pre code{background:none;padding:0}.flow{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap}.note{border-left:4px solid var(--accent);padding:10px 14px;background:var(--card);border-radius:10px}.muted{color:var(--muted)}ul{padding-left:22px}table{border-collapse:collapse;width:100%;background:var(--card);border-radius:12px;overflow:hidden}td,th{border:1px solid var(--border);padding:10px;text-align:left;vertical-align:top}footer{color:var(--muted);padding-top:28px;border-top:1px solid var(--border)}
+  </style>
+</head>
+<body>
+<header><div class="wrap">
+  <div class="eyebrow">Apache SkyWalking BanyanDB / BYDBQL / MCP</div>
+  <h1>BanyanDB BYDBQL AI 自动生成方案调研</h1>
+  <p class="subtitle">基于仓库源码调研 BYDBQL 语法、执行链路、MCP Prompt Generator，以及如何演进成生产级自然语言到 BYDBQL Agent。</p>
+  <p class="muted">Repo: apache/skywalking-banyandb · 本页由 OpenClaw 整理发布</p>
+</div></header>
+<main><div class="wrap">
+  <section class="card toc"><h2>目录</h2>
+    <a href="#summary">1. 总体结论</a><a href="#syntax">2. BYDBQL 语法能力</a><a href="#runtime">3. Query 执行链路</a><a href="#mcp">4. 当前 AI 生成方案：MCP Prompt Generator</a><a href="#validation">5. 校验与安全边界</a><a href="#gaps">6. 当前方案缺口</a><a href="#architecture">7. 生产级 NL → BYDBQL Agent 建议架构</a><a href="#files">8. 关键源码地图</a>
+  </section>
+
+  <section id="summary"><h2>1. 总体结论</h2>
+    <div class="grid">
+      <div class="card"><h3>已有雏形</h3><p>BanyanDB 仓库已经有一套 <b>MCP Prompt Generator + Query Executor</b> 的 AI 生成 BYDBQL 方案，主要位于 <code>mcp/</code>。</p></div>
+      <div class="card"><h3>不是内置 LLM</h3><p>当前实现不是 BanyanDB server 直接调用 LLM，而是通过 MCP 暴露 prompt 和工具，由外部 MCP 客户端/LLM 生成 BYDBQL。</p></div>
+      <div class="card"><h3>核心瓶颈</h3><p>当前上下文主要包含 group/resource/index rule，缺少细粒度 tag/field/type/analyzer 信息和自动修复闭环。</p></div>
+    </div>
+    <pre class="flow"><code>自然语言描述
+  ↓
+MCP prompt: generate_BydbQL / get_generate_bydbql_prompt
+  ↓
+加载 BanyanDB groups/resources/index rules
+  ↓
+LLM 输出 JSON { "BydbQL": "SELECT ..." }
+  ↓
+list_resources_bydbql 执行查询
+  ↓
+BanyanDB BydbQL parser + transformer + native query service</code></pre>
+  </section>
+
+  <section id="syntax"><h2>2. BYDBQL 语法能力</h2>
+    <p>BYDBQL 是 BanyanDB 自己的 SQL-like 查询 DSL，支持多种数据模型：</p>
+    <p><span class="badge">STREAM</span><span class="badge">MEASURE</span><span class="badge">TRACE</span><span class="badge">PROPERTY</span><span class="badge">TOPN</span></p>
+    <pre><code>SELECT * FROM STREAM sw IN default TIME &gt; '-30m'
+
+SELECT region, SUM(latency)
+FROM MEASURE metrics IN default
+TIME &gt; '-1h'
+GROUP BY region
+
+SELECT trace_id
+FROM TRACE sw_trace IN group1
+TIME &gt; '-30m'
+WHERE service_id = 'payment-service'
+
+SHOW TOP 10
+FROM MEASURE service_latency IN default
+TIME &gt; '-30m'
+ORDER BY DESC</code></pre>
+    <ul>
+      <li>Parser 使用 <code>github.com/alecthomas/participle/v2</code>，不是 ANTLR。</li>
+      <li>语法入口是 <code>Grammar.Select</code> 或 <code>Grammar.TopN</code>。</li>
+      <li>WHERE 支持 <code>AND</code>/<code>OR</code>/括号优先级、比较、<code>IN</code>/<code>NOT IN</code>、<code>HAVING</code>/<code>NOT HAVING</code>、<code>MATCH(...)</code>。</li>
+      <li>TIME 支持比较和 <code>BETWEEN</code>，时间值支持 RFC3339、<code>now</code>、相对时长如 <code>-30m</code>/<code>-1d</code>。</li>
+      <li>Measure 支持聚合、GROUP BY、Top projection；TopN 采用 <code>SHOW TOP N FROM MEASURE ...</code>。</li>
+    </ul>
+    <div class="note">注意：文档声明 Stream/Measure/Trace/TopN 查询需要 TIME，但 grammar 中 <code>Time</code> 是可选字段。这意味着“文档约束”强于“语法约束”，生产级 AI 生成器应按文档约束补 TIME。</div>
+  </section>
+
+  <section id="runtime"><h2>3. Query 执行链路</h2>
+    <pre class="flow"><code>HTTP/gRPC /v1/bydbql/query
+  ↓
+banyand/liaison/grpc/bydbql.go: bydbQLService.Query
+  ↓
+pkg/bydbql/parser.go: ParseQuery
+  ↓
+pkg/bydbql/grammar.go: AST
+  ↓
+pkg/bydbql/transformer.go: Transformer.Transform
+  ↓
+streamv1.QueryRequest / measurev1.QueryRequest / tracev1.QueryRequest / propertyv1.QueryRequest / measurev1.TopNRequest
+  ↓
+streamSvc.Query / measureSvc.Query / traceSvc.Query / propertyServer.Query / measureSvc.TopN</code></pre>
+    <p>Transformer 会结合 metadata repo 拉取 schema，做 tag/field/projection/criteria/time/order/aggregation 的语义转换。因此 AI 生成 BYDBQL 的关键不是“写得像 SQL”，而是要贴合 BanyanDB schema。</p>
+  </section>
+
+  <section id="mcp"><h2>4. 当前 AI 生成方案：MCP Prompt Generator</h2>
+    <p>核心文件：</p>
+    <ul>
+      <li><code>mcp/src/query/llm-prompt.ts</code>：生成完整 LLM prompt。</li>
+      <li><code>mcp/src/query/context.ts</code>：加载 groups/resources/index rules。</li>
+      <li><code>mcp/src/query/validation.ts</code>：校验输入和 BYDBQL 只读安全边界。</li>
+      <li><code>mcp/src/server/mcp.ts</code>：注册 MCP tools 和 prompt。</li>
+    </ul>
+    <h3>Prompt 注入的信息</h3>
+    <table><tr><th>上下文</th><th>来源</th><th>用途</th></tr>
+      <tr><td>Groups</td><td><code>banyandbClient.listGroups()</code></td><td>帮助选择 <code>IN group</code></td></tr>
+      <tr><td>Resource → Group Mapping</td><td>listStreams/listMeasures/listTraces/listProperties/listTopN</td><td>用户只说资源名时，推断资源类型和 group</td></tr>
+      <tr><td>Indexed Fields</td><td><code>listIndexRule(group)</code> 且 <code>!noSort</code></td><td>约束 <code>ORDER BY</code> 只能使用可排序索引字段</td></tr>
+    </table>
+    <h3>Prompt 里的关键规则</h3>
+    <ul>
+      <li>区分 <b>last N time units</b> 和 <b>last N data points</b>：<code>last 3 days</code> 是 TIME，不是 LIMIT。</li>
+      <li>只有明确请求排序/条数时才添加 <code>ORDER BY</code>/<code>LIMIT</code>。</li>
+      <li>TOPN 只针对 MEASURE 的 ranking 语义，格式为 <code>SHOW TOP N FROM MEASURE ...</code>。</li>
+      <li><code>ORDER BY</code> 字段必须在 indexed fields 中；不匹配时做相似字段替换或省略。</li>
+      <li>输出 JSON，至少包含 <code>BydbQL</code> 字段。</li>
+    </ul>
+  </section>
+
+  <section id="validation"><h2>5. 校验与安全边界</h2>
+    <p><code>mcp/src/query/validation.ts</code> 做了基础安全限制：</p>
+    <ul>
+      <li>BydbQL 长度上限 4096，description 上限 2048。</li>
+      <li>只允许 <code>SELECT</code> 或 <code>SHOW TOP</code> 开头。</li>
+      <li>禁止 <code>;</code>、<code>--</code>、<code>/*</code>、<code>*/</code>，减少多语句和注释注入风险。</li>
+      <li>resource_type/resource_name/group 有白名单和 identifier pattern 校验。</li>
+    </ul>
+    <pre class="flow"><code>MCP 参数校验
+  ↓
+只读前缀校验 SELECT / SHOW TOP
+  ↓
+禁止多语句/comment token
+  ↓
+BanyanDB ParseQuery 语法校验
+  ↓
+Transformer 结合 schema 做语义校验
+  ↓
+执行原生查询</code></pre>
+  </section>
+
+  <section id="gaps"><h2>6. 当前方案缺口</h2>
+    <ol>
+      <li><b>没有自动 parse/transform dry-run</b>：LLM 输出后通常到执行阶段才暴露错误。</li>
+      <li><b>schema context 不够细</b>：当前多是资源名和 index rule，缺 tag families、fields、类型、analyzer、是否可 MATCH/aggregate。</li>
+      <li><b>没有错误驱动自修复</b>：执行失败后没有把 parser/transformer 错误自动反馈给 LLM 重写。</li>
+      <li><b>没有 explain/validate API</b>：AI 无法低成本验证 query 会转成什么 native request。</li>
+      <li><b>Prompt 单体较长</b>：后续可拆成 system rules、grammar summary、schema context、few-shot、output schema。</li>
+    </ol>
+  </section>
+
+  <section id="architecture"><h2>7. 生产级 NL → BYDBQL Agent 建议架构</h2>
+    <pre class="flow"><code>用户自然语言
+  ↓
+Intent Parser / Query Planner
+  ↓
+Schema Retriever（groups/resources/tags/fields/index/analyzer）
+  ↓
+LLM Generate BydbQL JSON
+  ↓
+Static Validator
+  ↓
+BanyanDB Parse/Transform Dry Run 或 Explain
+  ↓
+Auto Repair Loop（最多 2-3 次）
+  ↓
+Execute Query
+  ↓
+Result Summarizer</code></pre>
+    <h3>建议新增能力</h3>
+    <ul>
+      <li><code>POST /v1/bydbql/validate</code>：只 parse + transform，不扫数据。</li>
+      <li><code>POST /v1/bydbql/explain</code>：返回 query type、native request、warnings。</li>
+      <li>Schema Retriever 返回字段级上下文：tag/field/type/index/analyzer/aggregatable/matchable。</li>
+      <li>Validator 规则化：TIME 必填策略、ORDER BY 索引校验、GROUP BY 字段存在、aggregation 字段类型校验。</li>
+      <li>Repair loop：把错误信息、原 query、可用 schema 传回 LLM，只允许修正 JSON。</li>
+    </ul>
+  </section>
+
+  <section id="files"><h2>8. 关键源码地图</h2>
+    <table><tr><th>文件</th><th>作用</th></tr>
+      <tr><td><code>docs/interacting/bydbql.md</code></td><td>BYDBQL 官方语法/语义文档</td></tr>
+      <tr><td><code>pkg/bydbql/grammar.go</code></td><td>Participle AST/grammar 定义</td></tr>
+      <tr><td><code>pkg/bydbql/parser.go</code></td><td>Lexer/parser 初始化与 <code>ParseQuery</code></td></tr>
+      <tr><td><code>pkg/bydbql/transformer.go</code></td><td>AST 到原生 protobuf query request 的转换</td></tr>
+      <tr><td><code>banyand/liaison/grpc/bydbql.go</code></td><td>BydbQL gRPC 服务入口和执行分派</td></tr>
+      <tr><td><code>mcp/src/query/llm-prompt.ts</code></td><td>自然语言生成 BYDBQL 的 prompt 模板</td></tr>
+      <tr><td><code>mcp/src/query/context.ts</code></td><td>加载 live schema context</td></tr>
+      <tr><td><code>mcp/src/query/validation.ts</code></td><td>MCP 输入与只读 BYDBQL 校验</td></tr>
+      <tr><td><code>mcp/src/server/mcp.ts</code></td><td>MCP tools/prompt 注册：<code>generate_BydbQL</code>、<code>get_generate_bydbql_prompt</code>、<code>list_resources_bydbql</code></td></tr>
+      <tr><td><code>ui/src/components/CodeMirror/bydbql-hint.js</code></td><td>UI BYDBQL autocomplete/hint，可复用其 schema hint 思路</td></tr>
+    </table>
+  </section>
+
+  <footer><p>Generated for learning and architecture review. Last updated: 2026-05-01 UTC.</p></footer>
+</div></main>
+</body>
+</html>
