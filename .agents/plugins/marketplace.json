@@ -1,0 +1,20 @@
+{
+  "name": "skywalking-banyandb",
+  "interface": {
+    "displayName": "SkyWalking BanyanDB"
+  },
+  "plugins": [
+    {
+      "name": "banyandbql",
+      "source": {
+        "source": "local",
+        "path": "./plugins/banyandbql"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

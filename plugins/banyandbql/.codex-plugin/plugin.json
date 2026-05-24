@@ -1,0 +1,38 @@
+{
+  "name": "banyandbql",
+  "version": "0.1.0",
+  "description": "Generate and execute BydbQL queries against BanyanDB from Codex.",
+  "author": {
+    "name": "Apache SkyWalking"
+  },
+  "homepage": "https://skywalking.apache.org/",
+  "repository": "https://github.com/apache/skywalking-banyandb",
+  "license": "Apache-2.0",
+  "keywords": [
+    "banyandb",
+    "bydbql",
+    "mcp",
+    "observability"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "BanyanDB QL",
+    "shortDescription": "Query and diagnose BanyanDB from Codex",
+    "longDescription": "BanyanDB QL connects Codex to the project MCP server so Codex can discover BanyanDB schemas, generate safe BydbQL, execute queries, and analyze user-reported symptoms with live data.",
+    "developerName": "Apache SkyWalking",
+    "category": "Productivity",
+    "capabilities": [
+      "MCP",
+      "Query",
+      "Analysis"
+    ],
+    "defaultPrompt": [
+      "List BanyanDB groups and schemas",
+      "Generate BydbQL for service metrics in the last hour",
+      "Analyze this BanyanDB symptom"
+    ],
+    "websiteURL": "https://skywalking.apache.org/",
+    "brandColor": "#0E7490"
+  }
+}

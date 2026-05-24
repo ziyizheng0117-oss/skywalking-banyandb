@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "banyandb": {
+      "command": "./scripts/start-banyandb-mcp.sh",
+      "args": [],
+      "cwd": ".",
+      "env": {
+        "TRANSPORT": "stdio"
+      }
+    }
+  }
+}
