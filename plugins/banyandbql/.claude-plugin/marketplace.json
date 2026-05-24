@@ -1,0 +1,29 @@
+{
+  "name": "banyandbql-marketplace",
+  "id": "banyandbql-marketplace",
+  "owner": {
+    "name": "Apache SkyWalking"
+  },
+  "metadata": {
+    "description": "BanyanDB QL plugin for Claude Code: schema discovery, BydbQL generation, query execution, and observability troubleshooting",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "banyandbql",
+      "source": "./",
+      "description": "Query and diagnose BanyanDB from Claude Code. Supports natural-language to BydbQL generation, schema discovery, read-only query execution, and symptom-driven root cause analysis.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Apache SkyWalking"
+      },
+      "keywords": [
+        "banyandb",
+        "bydbql",
+        "mcp",
+        "observability"
+      ],
+      "category": "productivity"
+    }
+  ]
+}
